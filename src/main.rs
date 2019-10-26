@@ -1,13 +1,16 @@
 #![deny(warnings, clippy::all)]
 
-use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use hyper::service::service_fn_ok;
-use hyper::{Body, Response, Server};
+use hyper::service::service_fn;
+use hyper::Server;
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
 use twitter_stream::rt::{self, Future, Stream};
 use twitter_stream::{Token, TwitterStreamBuilder};
+
+mod plot;
+mod server;
 
 /// Keywords to be tracked by the application
 static KEYWORDS: &[&str] = &[
@@ -39,14 +42,20 @@ fn main() {
     let token = Token::new(consumer_key, consumer_secret, token_key, token_secret);
     let keywords = KEYWORDS.join(",");
 
-    // Data shared between the stream handler and web server
-    let chart = Arc::new(Mutex::new(Vec::new()));
-    let chart2 = chart.clone();
+    // Initialize a Vec<f32> for each keyword
+    let mut chart: Vec<Vec<f32>> = Vec::new();
+    chart.resize_with(KEYWORDS.len(), Default::default);
 
     // Data used by the stream handler
     let mut count = 0u32;
     let mut accum: Vec<Score> = Vec::new();
     accum.resize_with(KEYWORDS.len(), Default::default);
+
+    // Draw initial empty plot
+    plot::draw_chart(&chart).unwrap();
+
+    let started_at = Instant::now();
+    let mut seconds_count = 0u64;
 
     let twitter_stream = TwitterStreamBuilder::filter(token)
         .stall_warnings(true)
@@ -57,6 +66,22 @@ fn main() {
         .unwrap()
         .flatten_stream()
         .for_each(move |json| {
+            // Save data at 1 second intervals
+            let runtime = (Instant::now() - started_at).as_secs();
+            if runtime > seconds_count {
+                // FIXME(JTG): If no messages come in within a second interval, then no points will be
+                // plotted for that interval
+
+                let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                for (idx, score) in current_scores.iter().enumerate() {
+                    // FIXME(JTG): Old data is never removed, this grows without bound
+                    chart[idx].push(*score);
+                }
+
+                plot::draw_chart(&chart).unwrap();
+                seconds_count = runtime;
+            }
+
             let (message, score) = match process(&json) {
                 Ok(s) => s,
                 Err(ProcessError::NoTweet(value)) => {
@@ -77,11 +102,6 @@ fn main() {
                 if json.contains(keyword) {
                     accum[i].add(score);
                 }
-            }
-
-            if count % 100 == 0 {
-                let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
-                chart.lock().unwrap().push(current_scores);
             }
 
             if log_enabled!(Trace) {
@@ -105,12 +125,8 @@ fn main() {
         .unwrap_or(8888);
     let addr = ([127, 0, 0, 1], port).into();
 
-    let service = move || {
-        let chart = chart2.clone();
-        service_fn_ok(move |_req| {
-            let response = format!("Current summary is {:#?}.", chart);
-            Response::new(Body::from(response))
-        })
+    let service = || {
+        service_fn(server::handle_request)
     };
 
     let server = Server::bind(&addr)
