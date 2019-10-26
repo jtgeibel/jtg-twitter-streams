@@ -1,5 +1,9 @@
 #![deny(warnings, clippy::all)]
 
+use std::sync::{Arc, Mutex};
+
+use hyper::service::service_fn_ok;
+use hyper::{Body, Response, Server};
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
 use twitter_stream::rt::{self, Future, Stream};
@@ -35,7 +39,12 @@ fn main() {
     let token = Token::new(consumer_key, consumer_secret, token_key, token_secret);
     let keywords = KEYWORDS.join(",");
 
-    let mut count = 0;
+    // Data shared between the stream handler and web server
+    let chart = Arc::new(Mutex::new(Vec::new()));
+    let chart2 = chart.clone();
+
+    // Data used by the stream handler
+    let mut count = 0u32;
     let mut accum: Vec<Score> = Vec::new();
     accum.resize_with(KEYWORDS.len(), Default::default);
 
@@ -70,6 +79,11 @@ fn main() {
                 }
             }
 
+            if count % 100 == 0 {
+                let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                chart.lock().unwrap().push(current_scores);
+            }
+
             if log_enabled!(Trace) {
                 let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
                 trace!(
@@ -83,12 +97,31 @@ fn main() {
 
             Ok(())
         })
-        .map_err(|e| println!("error: {}", e));
+        .map_err(|e| error!("Twitter stream error: {}", e));
 
-    rt::run(twitter_stream);
+    let port = dotenv::var("PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8888);
+    let addr = ([127, 0, 0, 1], port).into();
+
+    let service = move || {
+        let chart = chart2.clone();
+        service_fn_ok(move |_req| {
+            let response = format!("Current summary is {:#?}.", chart);
+            Response::new(Body::from(response))
+        })
+    };
+
+    let server = Server::bind(&addr)
+        .serve(service)
+        .map_err(|e| error!("Server error: {}", e));
+
+    let future = twitter_stream.select2(server).map(|_| ()).map_err(|_| ());
+    rt::run(future);
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct Score {
     score_sum: f32,
     message_count: u32,
