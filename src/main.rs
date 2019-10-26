@@ -101,6 +101,9 @@ impl Score {
     }
 
     fn average(&self) -> f32 {
+        if self.message_count == 0 {
+            return 0.0;
+        };
         self.score_sum / (self.message_count as f32)
     }
 }
