@@ -2,12 +2,12 @@
 
 use std::time::Instant;
 
-use hyper::service::service_fn;
+use futures::prelude::*;
+use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
-use twitter_stream::rt::{self, Future, Stream};
-use twitter_stream::{Token, TwitterStreamBuilder};
+use twitter_stream::Token;
 
 mod plot;
 mod server;
@@ -57,15 +57,15 @@ fn main() {
     let started_at = Instant::now();
     let mut seconds_count = 0u64;
 
-    let twitter_stream = TwitterStreamBuilder::filter(token)
+    let twitter_stream = twitter_stream::Builder::filter(token)
         .stall_warnings(true)
         // Since twitter is rate limiting, may as well focus on tweets we can analyze
         .language("en")
         .track(Some(&*keywords))
         .listen()
         .unwrap()
-        .flatten_stream()
-        .for_each(move |json| {
+        .try_flatten_stream()
+        .try_for_each(move |json| {
             // Save data at 1 second intervals
             let runtime = (Instant::now() - started_at).as_secs();
             if runtime > seconds_count {
@@ -88,9 +88,9 @@ fn main() {
                     error!("NoTweet: {}", value);
                     let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
                     debug!("Message count: {}, Summary: {:?}", count, current_scores);
-                    return Ok(());
+                    return future::ok(());
                 }
-                Err(_) => return Ok(()),
+                Err(_) => return future::ok(()),
             };
 
             count += 1;
@@ -115,7 +115,7 @@ fn main() {
                 );
             }
 
-            Ok(())
+            future::ok(())
         })
         .map_err(|e| error!("Twitter stream error: {}", e));
 
@@ -125,16 +125,19 @@ fn main() {
         .unwrap_or(8888);
     let addr = ([127, 0, 0, 1], port).into();
 
-    let service = || {
-        service_fn(server::handle_request)
-    };
+    let make_service =
+        make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(server::handle_request)) });
 
-    let server = Server::bind(&addr)
-        .serve(service)
-        .map_err(|e| error!("Server error: {}", e));
+    let server = Server::bind(&addr).serve(make_service);
 
-    let future = twitter_stream.select2(server).map(|_| ()).map_err(|_| ());
-    rt::run(future);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.spawn(async { twitter_stream.await.unwrap() });
+    rt.spawn(async {
+        if let Err(e) = server.await {
+            eprintln!("server error: {}", e);
+        }
+    });
+    rt.shutdown_on_idle();
 }
 
 #[derive(Clone, Debug, Default)]
