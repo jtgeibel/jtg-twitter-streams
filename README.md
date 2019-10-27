@@ -6,8 +6,9 @@ This is an example application demonstrating access to the Twitter Streaming API
 
 ### Build Dependencies
 
-This crate uses async/await syntax, so a beta or nightly compiler is necessary until rustc
-1.39.0 is released.
+This crate uses async/await syntax, so a nightly compiler is necessary.  The beta channel does not
+work at the moment due to some pinned dependencies, but it is expected the ecosystem will stabilize
+quickly after 1.39.0 is released.
 
 The charting functionality depends on a system library to draw text.  On an Ubuntu system, you can
 run `sudo apt-get install libfontconfig libfontconfig1-dev libfreetype6-dev` (tested on Ubuntu
@@ -30,7 +31,7 @@ TWITTER_TOKEN_SECRET=<secret>
 
 ### Run the Server
 
-The server can now be run with `cargo +beta run --release`.
+The server can now be run with `cargo +nightly run --release`.
 
 ## License
 
