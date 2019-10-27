@@ -123,7 +123,14 @@ fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(8888);
-    let addr = ([127, 0, 0, 1], port).into();
+
+    let addr = if let Some("production") = dotenv::var("APP_ENV").ok().as_ref().map(String::as_str) {
+        println!("Running in production mode, binding to port {} on all addresses", port);
+        ([0, 0, 0, 0], port).into()
+    } else {
+        println!("Running in development mode, binding to port {} on localhost only", port);
+        ([127, 0, 0, 1], port).into()
+    };
 
     let make_service =
         make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(server::handle_request)) });
