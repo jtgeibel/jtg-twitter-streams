@@ -2,7 +2,7 @@ use super::KEYWORDS;
 
 use plotters::prelude::*;
 
-const CHART_DIMENSIONS: (u32, u32) = (640, 480);
+const CHART_DIMENSIONS: (u32, u32) = (1600, 900);
 
 pub fn draw_chart(data: &[Vec<f32>]) -> Result<(), Box<dyn std::error::Error>> {
     let (y_min, y_max) = data.iter().flatten().fold((0.0, 0.0), |mut acc, &x| {
@@ -15,7 +15,7 @@ pub fn draw_chart(data: &[Vec<f32>]) -> Result<(), Box<dyn std::error::Error>> {
         acc
     });
 
-    let root = BitMapBackend::new("/tmp/chart.png", CHART_DIMENSIONS).into_drawing_area();
+    let root = BitMapBackend::new("/tmp/chart2.png", CHART_DIMENSIONS).into_drawing_area();
     root.fill(&WHITE)?;
 
     let mut cc = ChartBuilder::on(&root)
@@ -50,6 +50,11 @@ pub fn draw_chart(data: &[Vec<f32>]) -> Result<(), Box<dyn std::error::Error>> {
         .background_style(&WHITE.mix(0.8))
         .border_style(&BLACK)
         .draw()?;
+
+    // Write file then rename so the web server doesn't see a partially written file
+    drop(cc);
+    drop(root);
+    std::fs::rename("/tmp/chart2.png", "/tmp/chart.png")?;
 
     Ok(())
 }
