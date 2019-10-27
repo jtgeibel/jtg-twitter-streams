@@ -6,9 +6,9 @@ const CHART_DIMENSIONS: (u32, u32) = (1600, 900);
 
 /// Save a line series chart of the data to a PNG located at `/tmp/chart.png`
 ///
-/// # FIXME
+/// # Blocking
 ///
-/// This function makes blocking file system calls, but is called from an async context
+/// This function makes blocking file system calls.
 pub fn draw_chart(data: &[Vec<f32>]) -> Result<(), Box<dyn std::error::Error>> {
     let (y_min, y_max) = data.iter().flatten().fold((0.0, 0.0), |mut acc, &x| {
         if x < acc.0 {

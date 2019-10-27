@@ -89,14 +89,21 @@ fn main() {
                         chart[idx].push(*score);
                     }
 
-                    // FIXME: Add call to tokio_executor::threadpool::blocking
-                    plot::draw_chart(&chart).unwrap();
+                    // FIXME: If chart drawing becomes slow it will delay releasing lock on seconds_count, blocking other tasks
+                    future::poll_fn(|_| {
+                        tokio_executor::threadpool::blocking(|| plot::draw_chart(&chart).unwrap())
+                    })
+                    .await
+                    .unwrap();
                     *seconds_count = runtime;
                 }
                 drop(seconds_count);
 
-                // FIXME: Add call to tokio_executor::threadpool::blocking
-                let (message, score) = match process(&json) {
+                let result =
+                    future::poll_fn(|_| tokio_executor::threadpool::blocking(|| process(&json)))
+                        .await
+                        .unwrap();
+                let (message, score) = match result {
                     Ok(s) => s,
                     Err(ProcessError::NoTweet(value)) => {
                         error!("NoTweet: {}", value);
