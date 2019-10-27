@@ -7,6 +7,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use log::Level::Trace;
 use log::{debug, error, log_enabled, trace};
+use tokio_sync::Lock;
 use twitter_stream::Token;
 
 mod plot;
@@ -46,16 +47,17 @@ fn main() {
     let mut chart: Vec<Vec<f32>> = Vec::new();
     chart.resize_with(KEYWORDS.len(), Default::default);
 
-    // Data used by the stream handler
-    let mut count = 0u32;
-    let mut accum: Vec<Score> = Vec::new();
-    accum.resize_with(KEYWORDS.len(), Default::default);
-
     // Draw initial empty plot
     plot::draw_chart(&chart).unwrap();
 
+    // Data used by the twitter stream handler
     let started_at = Instant::now();
-    let mut seconds_count = 0u64;
+    let seconds_count = tokio_sync::Lock::new(0u64);
+    let count = Lock::new(0u32);
+    let mut accum: Vec<Score> = Vec::new();
+    accum.resize_with(KEYWORDS.len(), Default::default);
+    let accum = Lock::new(accum);
+    let chart = Lock::new(chart);
 
     let twitter_stream = twitter_stream::Builder::filter(token)
         .stall_warnings(true)
@@ -66,58 +68,75 @@ fn main() {
         .unwrap()
         .try_flatten_stream()
         .try_for_each(move |json| {
-            // Save data at 1 second intervals
-            let runtime = (Instant::now() - started_at).as_secs();
-            if runtime > seconds_count {
-                // FIXME(JTG): If no messages come in within a second interval, then no points will be
-                // plotted for that interval
+            let mut seconds_count = seconds_count.clone();
+            let mut accum = accum.clone();
+            let mut chart = chart.clone();
+            let mut count = count.clone();
 
-                let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
-                for (idx, score) in current_scores.iter().enumerate() {
-                    // FIXME(JTG): Old data is never removed, this grows without bound
-                    chart[idx].push(*score);
-                }
+            async move {
+                // Save data at 1 second intervals
+                let runtime = (Instant::now() - started_at).as_secs();
+                let mut seconds_count = seconds_count.lock().await;
+                if runtime > *seconds_count {
+                    // FIXME(JTG): If no messages come in within a second interval, then no points will be
+                    // plotted for that interval
 
-                plot::draw_chart(&chart).unwrap();
-                seconds_count = runtime;
-            }
-
-            let (message, score) = match process(&json) {
-                Ok(s) => s,
-                Err(ProcessError::NoTweet(value)) => {
-                    error!("NoTweet: {}", value);
+                    let accum = accum.lock().await;
+                    let mut chart = chart.lock().await;
                     let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
-                    debug!("Message count: {}, Summary: {:?}", count, current_scores);
-                    return future::ok(());
+                    for (idx, score) in current_scores.iter().enumerate() {
+                        // FIXME(JTG): Old data is never removed, this grows without bound
+                        chart[idx].push(*score);
+                    }
+
+                    // FIXME: Add call to tokio_executor::threadpool::blocking
+                    plot::draw_chart(&chart).unwrap();
+                    *seconds_count = runtime;
                 }
-                Err(_) => return future::ok(()),
-            };
+                drop(seconds_count);
 
-            count += 1;
+                // FIXME: Add call to tokio_executor::threadpool::blocking
+                let (message, score) = match process(&json) {
+                    Ok(s) => s,
+                    Err(ProcessError::NoTweet(value)) => {
+                        error!("NoTweet: {}", value);
+                        let accum = accum.lock().await;
+                        let count = count.lock().await;
+                        let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                        debug!("Message count: {}, Summary: {:?}", *count, current_scores);
+                        return Ok(());
+                    }
+                    Err(_) => return Ok(()),
+                };
 
-            // Determine the keyword(s) present (could match more than one)
-            // The whole blob from twitter is scanned, because many times the keyword is not in
-            // the message itself
-            for (i, keyword) in KEYWORDS.iter().enumerate() {
-                if json.contains(keyword) {
-                    accum[i].add(score);
+                // Determine the keyword(s) present (could match more than one)
+                // The whole blob from twitter is scanned, because many times the keyword is not in
+                // the message itself
+                let mut accum = accum.lock().await; // FIXME: Do less work while holding this lock
+                for (i, keyword) in KEYWORDS.iter().enumerate() {
+                    if json.contains(keyword) {
+                        accum[i].add(score);
+                    }
                 }
-            }
 
-            if log_enabled!(Trace) {
-                let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
-                trace!(
-                    "{}: {} - {:?}; tweet: {}",
-                    count,
-                    score,
-                    current_scores,
-                    message
-                );
-            }
+                let mut count = count.lock().await;
+                *count += 1;
+                if log_enabled!(Trace) {
+                    let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                    trace!(
+                        "{}: {} - {:?}; tweet: {}",
+                        *count,
+                        score,
+                        current_scores,
+                        message
+                    );
+                }
 
-            future::ok(())
-        })
-        .map_err(|e| error!("Twitter stream error: {}", e));
+                Ok(())
+            }
+        });
+
+    // Configure web server
 
     let port = dotenv::var("PORT")
         .ok()
@@ -144,7 +163,11 @@ fn main() {
     let server = Server::bind(&addr).serve(make_service);
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.spawn(async { twitter_stream.await.unwrap() });
+    rt.spawn(async {
+        if let Err(e) = twitter_stream.await {
+            error!("Twitter stream error: {}", e);
+        }
+    });
     rt.spawn(async {
         if let Err(e) = server.await {
             error!("Web server error: {}", e);
