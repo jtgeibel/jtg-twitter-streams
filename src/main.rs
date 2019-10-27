@@ -67,7 +67,10 @@ fn main() {
         .listen()
         .unwrap()
         .try_flatten_stream()
-        .try_for_each(move |json| {
+        // FIXME: This stream is not actually being processed concurrently and its unclear why not
+        // See the note in the architecture section of the README
+        .try_for_each_concurrent(4, move |json| {
+            // If multiple locks are held at once, they should be locked in this order to avoid deadlock
             let mut seconds_count = seconds_count.clone();
             let mut accum = accum.clone();
             let mut chart = chart.clone();
@@ -89,7 +92,7 @@ fn main() {
                         chart[idx].push(*score);
                     }
 
-                    // FIXME: If chart drawing becomes slow it will delay releasing lock on seconds_count, blocking other tasks
+                    // FIXME: If chart drawing becomes slow it will delay releasing lock on seconds_count, stalling other tasks
                     future::poll_fn(|_| {
                         tokio_executor::threadpool::blocking(|| plot::draw_chart(&chart).unwrap())
                     })

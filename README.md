@@ -14,8 +14,6 @@ The charting functionality depends on a system library to draw text.  On an Ubun
 run `sudo apt-get install libfontconfig libfontconfig1-dev libfreetype6-dev` (tested on Ubuntu
 19.10).
 
-**TODO**: Run in a clean install to see if any other system deps are needed.
-
 ### Setup
 
 To run the application, first crate a `.env` file setting the following environment variables.
@@ -35,7 +33,26 @@ The server can now be run with `cargo +nightly run --release`.
 
 ## Architecture
 
-**TODO**
+The application spawns two top-level tasks.  The "client task" makes a connection to the Twitter
+Streaming API and runs sentiment analysis on the received tweets.  At 1 second intervals, this task
+plots a line series graph of the accumulated data and saves it to a PNG on the local filesystem.
+
+The other top-level task is the "server task".  It listens for incoming HTTP connections and serves
+up either a static HTML page, or the PNG image.  The HTML file includes a meta tag to refresh the
+page every 2 seconds.
+
+The two top-level tasks only share a single piece of state (the PNG image) through the filesystem.
+After writing the file, the client task renames the file into place so the server task never
+observes a partially written file.
+
+Note that for some reason the client task is not being run concurrently.  If I introduce delay into
+the sentiment analysis (via `thread::sleep`) then the next tweet is not processed until the
+previous future completes.  With the current design I expect that up to 4 threads should be able to
+sleep concurrently before stalling the processing of additional tweets.  If I add a similar sleep
+delay to the server task (within a call to `tokio_executor::threadpool::blocking`), things behave
+as expected and multiple HTTP clients are able to connect and sleep in parallel.  I have not yet
+tracked down the source of this bug, however the existing processing is sufficiently fast to handle
+the current stream of data sent by Twitter, even without this concurrency.
 
 ## Possible Enhancements
 
