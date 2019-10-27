@@ -28,7 +28,7 @@ static KEYWORDS: &[&str] = &[
 
 fn main() {
     env_logger::init();
-    dotenv::dotenv().expect("Failed to load .env file");
+    dotenv::dotenv().ok();
 
     let consumer_key = dotenv::var("TWITTER_CONSUMER_KEY")
         .expect("Environment variable TWITTER_CONSUMER_KEY is not set");
