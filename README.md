@@ -33,6 +33,23 @@ TWITTER_TOKEN_SECRET=<secret>
 
 The server can now be run with `cargo +nightly run --release`.
 
+## Architecture
+
+**TODO**
+
+## Possible Enhancements
+
+* It would be nice to move the legend outside of the chart area so that most recent data is not
+  obscured, and to have thicker line weights in the plot.  Neither seems to be implemented upstream
+  in the crate I picked.
+* The page flickers with each reload, which isn't ideal.  It may be possible to load the image via
+  AJAX and then draw the PNG via canvas or a data URL.  Or, the raw data could be sent for
+  client-side rendering.  The current plotting library appears to support compilation to WASM and
+  could possibly be used there.
+* A WebSocket could be used to send data incrementally for client-side rendering.
+* A debug assertion is hit within `miniz_oxide-0.3.4` when run in debug mode.  See if this is
+  reported upstream.
+
 ## License
 
 Licensed under either of these:

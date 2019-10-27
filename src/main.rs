@@ -124,24 +124,30 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(8888);
 
-    let addr = if let Some("production") = dotenv::var("APP_ENV").ok().as_ref().map(String::as_str) {
-        println!("Running in production mode, binding to port {} on all addresses", port);
+    let addr = if let Some("production") = dotenv::var("APP_ENV").ok().as_ref().map(String::as_str)
+    {
+        println!(
+            "Running in production mode, binding to port {} on all addresses",
+            port
+        );
         ([0, 0, 0, 0], port).into()
     } else {
-        println!("Running in development mode, binding to port {} on localhost only", port);
+        println!(
+            "Running in development mode, binding to port {} on localhost only",
+            port
+        );
         ([127, 0, 0, 1], port).into()
     };
 
     let make_service =
         make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(server::handle_request)) });
-
     let server = Server::bind(&addr).serve(make_service);
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.spawn(async { twitter_stream.await.unwrap() });
     rt.spawn(async {
         if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+            error!("Web server error: {}", e);
         }
     });
     rt.shutdown_on_idle();
@@ -167,6 +173,7 @@ impl Score {
     }
 }
 
+/// Errors that may be encountered when deserializing and analyzing a tweet
 enum ProcessError {
     InvalidJson(serde_json::Error),
     NoTweet(serde_json::Value),
@@ -178,6 +185,7 @@ impl From<serde_json::Error> for ProcessError {
     }
 }
 
+/// Decode the message and run sentiment analysis if a tweet is present
 fn process(json: &str) -> Result<(String, f32), ProcessError> {
     let json: serde_json::Value = serde_json::from_str(json)?;
     if let Some(message) = json.get("text") {
