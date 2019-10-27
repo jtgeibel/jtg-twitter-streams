@@ -6,7 +6,8 @@ use futures::prelude::*;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Server;
 use log::Level::Trace;
-use log::{debug, error, log_enabled, trace};
+use log::{error, log_enabled, trace};
+use tokio_executor::threadpool;
 use tokio_sync::Lock;
 use twitter_stream::Token;
 
@@ -40,10 +41,7 @@ fn main() {
     let token_secret = dotenv::var("TWITTER_TOKEN_SECRET")
         .expect("Environment variable TWITTER_TOKEN_SECRET is not set");
 
-    let token = Token::new(consumer_key, consumer_secret, token_key, token_secret);
-    let keywords = KEYWORDS.join(",");
-
-    // Initialize a Vec<f32> for each keyword
+    // Initialize an empty Vec<f32> for each keyword
     let mut chart: Vec<Vec<f32>> = Vec::new();
     chart.resize_with(KEYWORDS.len(), Default::default);
 
@@ -54,11 +52,13 @@ fn main() {
     let started_at = Instant::now();
     let seconds_count = tokio_sync::Lock::new(0u64);
     let count = Lock::new(0u32);
-    let mut accum: Vec<Score> = Vec::new();
+    let mut accum: Vec<KeywordScore> = Vec::new();
     accum.resize_with(KEYWORDS.len(), Default::default);
     let accum = Lock::new(accum);
     let chart = Lock::new(chart);
 
+    let token = Token::new(consumer_key, consumer_secret, token_key, token_secret);
+    let keywords = KEYWORDS.join(",");
     let twitter_stream = twitter_stream::Builder::filter(token)
         .stall_warnings(true)
         // Since twitter is rate limiting, may as well focus on tweets we can analyze
@@ -67,7 +67,7 @@ fn main() {
         .listen()
         .unwrap()
         .try_flatten_stream()
-        // FIXME: This stream is not actually being processed concurrently and its unclear why not
+        // FIXME(JTG): This stream is not actually being processed concurrently and its unclear why not
         // See the note in the architecture section of the README
         .try_for_each_concurrent(4, move |json| {
             // If multiple locks are held at once, they should be locked in this order to avoid deadlock
@@ -81,39 +81,32 @@ fn main() {
                 let runtime = (Instant::now() - started_at).as_secs();
                 let mut seconds_count = seconds_count.lock().await;
                 if runtime > *seconds_count {
-                    // FIXME(JTG): If no messages come in within a second interval, then no points will be
+                    // FIXME(JTG): If no messages come in within a 1 second interval, then no points will be
                     // plotted for that interval
 
                     let accum = accum.lock().await;
                     let mut chart = chart.lock().await;
-                    let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                    let current_scores: Vec<_> = accum.iter().map(KeywordScore::average).collect();
                     for (idx, score) in current_scores.iter().enumerate() {
                         // FIXME(JTG): Old data is never removed, this grows without bound
                         chart[idx].push(*score);
                     }
 
-                    // FIXME: If chart drawing becomes slow it will delay releasing lock on seconds_count, stalling other tasks
-                    future::poll_fn(|_| {
-                        tokio_executor::threadpool::blocking(|| plot::draw_chart(&chart).unwrap())
-                    })
-                    .await
-                    .unwrap();
+                    // FIXME(JTG): If chart drawing becomes slow it will delay releasing lock on seconds_count, stalling other tasks
+                    future::poll_fn(|_| threadpool::blocking(|| plot::draw_chart(&chart).unwrap()))
+                        .await
+                        .unwrap();
                     *seconds_count = runtime;
                 }
                 drop(seconds_count);
 
-                let result =
-                    future::poll_fn(|_| tokio_executor::threadpool::blocking(|| process(&json)))
-                        .await
-                        .unwrap();
-                let (message, score) = match result {
+                let result = future::poll_fn(|_| threadpool::blocking(|| process(&json)))
+                    .await
+                    .unwrap();
+                let (tweet, score) = match result {
                     Ok(s) => s,
                     Err(ProcessError::NoTweet(value)) => {
                         error!("NoTweet: {}", value);
-                        let accum = accum.lock().await;
-                        let count = count.lock().await;
-                        let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
-                        debug!("Message count: {}, Summary: {:?}", *count, current_scores);
                         return Ok(());
                     }
                     Err(_) => return Ok(()),
@@ -121,8 +114,8 @@ fn main() {
 
                 // Determine the keyword(s) present (could match more than one)
                 // The whole blob from twitter is scanned, because many times the keyword is not in
-                // the message itself
-                let mut accum = accum.lock().await; // FIXME: Do less work while holding this lock
+                // the tweet itself
+                let mut accum = accum.lock().await; // FIXME(JTG): Do less work while holding this lock
                 for (i, keyword) in KEYWORDS.iter().enumerate() {
                     if json.contains(keyword) {
                         accum[i].add(score);
@@ -132,13 +125,13 @@ fn main() {
                 let mut count = count.lock().await;
                 *count += 1;
                 if log_enabled!(Trace) {
-                    let current_scores: Vec<_> = accum.iter().map(Score::average).collect();
+                    let current_scores: Vec<_> = accum.iter().map(KeywordScore::average).collect();
                     trace!(
                         "{}: {} - {:?}; tweet: {}",
                         *count,
                         score,
                         current_scores,
-                        message
+                        tweet
                     );
                 }
 
@@ -172,6 +165,7 @@ fn main() {
         make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(server::handle_request)) });
     let server = Server::bind(&addr).serve(make_service);
 
+    // Spawn the top-level client and server tasks
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.spawn(async {
         if let Err(e) = twitter_stream.await {
@@ -186,23 +180,24 @@ fn main() {
     rt.shutdown_on_idle();
 }
 
+/// A tally of the total score and tweet count for each keyword
 #[derive(Clone, Debug, Default)]
-struct Score {
+struct KeywordScore {
     score_sum: f32,
-    message_count: u32,
+    tweet_count: u32,
 }
 
-impl Score {
+impl KeywordScore {
     fn add(&mut self, score: f32) {
         self.score_sum += score;
-        self.message_count += 1;
+        self.tweet_count += 1;
     }
 
     fn average(&self) -> f32 {
-        if self.message_count == 0 {
+        if self.tweet_count == 0 {
             return 0.0;
         };
-        self.score_sum / (self.message_count as f32)
+        self.score_sum / (self.tweet_count as f32)
     }
 }
 
@@ -219,11 +214,15 @@ impl From<serde_json::Error> for ProcessError {
 }
 
 /// Decode the message and run sentiment analysis if a tweet is present
+///
+/// # Blocking
+///
+/// This function may be computationally intensive.
 fn process(json: &str) -> Result<(String, f32), ProcessError> {
     let json: serde_json::Value = serde_json::from_str(json)?;
-    if let Some(message) = json.get("text") {
-        let sentiment = sentiment::analyze(message.to_string());
-        Ok((message.to_string(), sentiment.score))
+    if let Some(tweet) = json.get("text") {
+        let sentiment = sentiment::analyze(tweet.to_string());
+        Ok((tweet.to_string(), sentiment.score))
     } else {
         Err(ProcessError::NoTweet(json))
     }

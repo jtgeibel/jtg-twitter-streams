@@ -8,14 +8,14 @@ const CHART_DIMENSIONS: (u32, u32) = (1600, 900);
 ///
 /// # Blocking
 ///
-/// This function makes blocking file system calls.
+/// This function makes blocking filesystem calls.
 pub fn draw_chart(data: &[Vec<f32>]) -> Result<(), Box<dyn std::error::Error>> {
-    let (y_min, y_max) = data.iter().flatten().fold((0.0, 0.0), |mut acc, &x| {
-        if x < acc.0 {
-            acc.0 = x;
+    let (y_min, y_max) = data.iter().flatten().fold((0.0, 0.0), |mut acc, &y| {
+        if y < acc.0 {
+            acc.0 = y;
         }
-        if x > acc.1 {
-            acc.1 = x;
+        if y > acc.1 {
+            acc.1 = y;
         }
         acc
     });

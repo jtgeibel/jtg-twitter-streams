@@ -42,10 +42,10 @@ up either a static HTML page, or the PNG image.  The HTML file includes a meta t
 page every 2 seconds.
 
 The two top-level tasks only share a single piece of state (the PNG image) through the filesystem.
-After writing the file, the client task renames the file into place so the server task never
+After writing to a new file, the client task renames the file into place so the server task never
 observes a partially written file.
 
-Note that for some reason the client task is not being run concurrently.  If I introduce delay into
+Note that for some reason the client sub-tasks are not being run concurrently.  If I introduce delay into
 the sentiment analysis (via `thread::sleep`) then the next tweet is not processed until the
 previous future completes.  With the current design I expect that up to 4 threads should be able to
 sleep concurrently before stalling the processing of additional tweets.  If I add a similar sleep
@@ -64,7 +64,7 @@ the current stream of data sent by Twitter, even without this concurrency.
   client-side rendering.  The current plotting library appears to support compilation to WASM and
   could possibly be used there.
 * A WebSocket could be used to send data incrementally for client-side rendering.
-* A debug assertion is hit within `miniz_oxide-0.3.4` when run in debug mode.  See if this is
+* A debug assertion is hit within `miniz_oxide-0.3.4` when run in debug mode.  Check if this is
   reported upstream.
 
 ## License
