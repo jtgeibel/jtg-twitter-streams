@@ -34,7 +34,7 @@ pub async fn process_twitter_message(
     // If multiple locks are held at once, they should be locked in parameter order to avoid a deadlock
     mut tick_tracker: Lock<TickTracker>,
     mut accum: Lock<Vec<KeywordScore>>,
-    mut chart: Lock<Vec<Vec<f32>>>,
+    mut chart: Lock<plot::Chart>,
     mut count: Lock<u32>,
 ) -> Result<(), twitter_stream::error::Error> {
     // Save data at 1 second intervals
@@ -49,11 +49,11 @@ pub async fn process_twitter_message(
         let current_scores: Vec<_> = accum.iter().map(KeywordScore::average).collect();
         for (idx, score) in current_scores.iter().enumerate() {
             // FIXME(JTG): Old data is never removed, this grows without bound
-            chart[idx].push(*score);
+            chart.push(idx, *score);
         }
 
         // FIXME(JTG): If chart drawing becomes slow it will delay releasing lock on seconds_count, stalling other tasks
-        future::poll_fn(|_| threadpool::blocking(|| plot::draw_chart(&chart).unwrap()))
+        future::poll_fn(|_| threadpool::blocking(|| chart.plot_and_save().unwrap()))
             .await
             .unwrap();
         tick_tracker.seconds_count = runtime;

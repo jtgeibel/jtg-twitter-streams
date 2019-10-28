@@ -50,12 +50,9 @@ fn main() {
     env_logger::init();
     dotenv::dotenv().ok();
 
-    // Initialize an empty Vec<f32> for each keyword
-    let mut chart: Vec<Vec<f32>> = Vec::new();
-    chart.resize_with(KEYWORDS.len(), Default::default);
-
     // Draw initial empty plot
-    plot::draw_chart(&chart).unwrap();
+    let chart = plot::Chart::new();
+    chart.plot_and_save().unwrap();
 
     // Locks used by the twitter client tasks
     let tick_tracker = Lock::new(client::TickTracker::new());
