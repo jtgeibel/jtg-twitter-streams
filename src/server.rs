@@ -1,6 +1,6 @@
 use hyper::{Body, Request, Response, Result, StatusCode};
+use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use tokio_fs::File;
 
 /// Serve the PNG on a single path, and the index on all other routes
 pub async fn handle_request(req: Request<Body>) -> Result<Response<Body>> {

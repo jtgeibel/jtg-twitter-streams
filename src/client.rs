@@ -5,10 +5,10 @@ use std::time::Instant;
 use futures::future;
 use log::Level::Trace;
 use log::{error, log_enabled, trace};
+use tokio::sync::Lock;
 use tokio_executor::threadpool;
-use tokio_sync::Lock;
 
-/// Locks protecting state that is shared between client tasks
+/// Locks that protect shared state between client tasks
 ///
 /// If multiple locks are held at the same time, they should be locked in definition order to avoid
 /// a deadlock.
@@ -34,7 +34,7 @@ impl ClientState {
         let tick_tracker = Lock::new(TickTracker::new());
         let tweet_count = Lock::new(0u32);
 
-        let mut current_scores: Vec<KeywordScore> = Vec::new();
+        let mut current_scores = Vec::new();
         current_scores.resize_with(KEYWORDS.len(), Default::default);
         let current_scores = Lock::new(current_scores);
 
@@ -48,7 +48,7 @@ impl ClientState {
 }
 
 /// A tally of the total score and tweet count for a keyword
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct KeywordScore {
     score_sum: f32,
     tweet_count: u32,
@@ -60,7 +60,7 @@ impl KeywordScore {
         self.tweet_count += 1;
     }
 
-    fn average(&self) -> f32 {
+    pub fn average(&self) -> f32 {
         if self.tweet_count == 0 {
             return 0.0;
         };
@@ -89,32 +89,12 @@ impl TickTracker {
     }
 }
 
+/// Process a JSON message, updating shared client state to track scores and plot the analysis
 pub async fn process_twitter_message(
     json: string::String<bytes::Bytes>,
     mut locks: ClientState,
 ) -> Result<(), twitter_stream::error::Error> {
-    // Save data at 1 second intervals
-    let mut tick_tracker = locks.tick_tracker.lock().await;
-    let runtime = tick_tracker.runtime();
-    if runtime > tick_tracker.seconds_count {
-        // FIXME(JTG): If no messages come in within a 1 second interval, then no points will be
-        // plotted for that interval
-
-        let current_scores = locks.current_scores.lock().await;
-        let mut chart = locks.chart.lock().await;
-        let current_scores: Vec<_> = current_scores.iter().map(KeywordScore::average).collect();
-        for (idx, score) in current_scores.iter().enumerate() {
-            // FIXME(JTG): Old data is never removed, this grows without bound
-            chart.push(idx, *score);
-        }
-
-        // FIXME(JTG): If chart drawing becomes slow it will delay releasing lock on seconds_count, stalling other tasks
-        future::poll_fn(|_| threadpool::blocking(|| chart.plot_and_save().unwrap()))
-            .await
-            .unwrap();
-        tick_tracker.seconds_count = runtime;
-    }
-    drop(tick_tracker);
+    save_chart_if_new_tick(&mut locks).await;
 
     let result = future::poll_fn(|_| threadpool::blocking(|| process(&json)))
         .await
@@ -152,6 +132,27 @@ pub async fn process_twitter_message(
     }
 
     Ok(())
+}
+
+/// Check if a new 1 second interval has passed, saving a new chart if so
+async fn save_chart_if_new_tick(locks: &mut ClientState) {
+    // FIXME(JTG): If no messages come in within a 1 second interval, then no points will be
+    // plotted for that interval.  Look into moving this out of the client handler and scheduling
+    // with tokio_timer.
+    let mut tick_tracker = locks.tick_tracker.lock().await;
+    let runtime = tick_tracker.runtime();
+    if runtime > tick_tracker.seconds_count {
+        let current_scores = locks.current_scores.lock().await;
+        let mut chart = locks.chart.lock().await;
+        // FIXME(JTG): Old data is never removed, this grows without bound
+        chart.push(&current_scores);
+
+        // FIXME(JTG): If chart drawing becomes slow it will delay releasing lock on tick_tracker, stalling other tasks
+        future::poll_fn(|_| threadpool::blocking(|| chart.plot_and_save().unwrap()))
+            .await
+            .unwrap();
+        tick_tracker.seconds_count = runtime;
+    }
 }
 
 /// Errors that may be encountered when deserializing and analyzing a tweet

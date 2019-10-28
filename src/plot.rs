@@ -1,4 +1,4 @@
-use super::KEYWORDS;
+use super::{client::KeywordScore, KEYWORDS};
 
 use plotters::prelude::*;
 
@@ -15,8 +15,10 @@ impl Chart {
     }
 
     /// Given a keyword index, pushes the value onto the end of its Vec
-    pub fn push(&mut self, idx: usize, val: f32) {
-        self.0[idx].push(val)
+    pub fn push(&mut self, current_scores: &[KeywordScore]) {
+        for (idx, score) in current_scores.iter().map(KeywordScore::average).enumerate() {
+            self.0[idx].push(score)
+        }
     }
 
     /// Save a line series chart of the data to a PNG located at `/tmp/chart.png`
@@ -47,8 +49,6 @@ impl Chart {
             .build_ranged(0..data[0].len() as u32, y_min..y_max)?;
 
         cc.configure_mesh()
-            .x_label_formatter(&|x| format!("{}", x))
-            .y_label_formatter(&|y| format!("{}", y))
             .x_labels(15)
             .y_labels(5)
             .x_desc("Seconds")

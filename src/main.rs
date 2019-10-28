@@ -25,8 +25,8 @@ static KEYWORDS: &[&str] = &[
 ];
 
 fn main() {
-    env_logger::init();
     dotenv::dotenv().ok();
+    env_logger::init();
 
     // Configure Twitter Streaming API "client task"
     let client_state = client::ClientState::init();
@@ -48,7 +48,7 @@ fn main() {
 
     // Configure the HTTP "server task"
     let make_service =
-        make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(server::handle_request)) });
+        make_service_fn(|_| async { hyper::Result::Ok(service_fn(server::handle_request)) });
     let server = Server::bind(&env::get_server_addr()).serve(make_service);
 
     // Spawn the top-level client and server tasks

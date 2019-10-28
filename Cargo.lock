@@ -1786,9 +1786,6 @@ dependencies = [
  "string 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.2.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-executor 0.2.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-fs 0.2.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-io 0.2.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-sync 0.2.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "twitter-stream 0.10.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
