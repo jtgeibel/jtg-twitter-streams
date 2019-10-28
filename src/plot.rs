@@ -14,9 +14,13 @@ impl Chart {
         Self(chart)
     }
 
-    /// Given a keyword index, pushes the value onto the end of its Vec
+    /// Add a set of keyword scores to the end of the chart
     pub fn push(&mut self, current_scores: &[KeywordScore]) {
-        for (idx, score) in current_scores.iter().map(KeywordScore::average).enumerate() {
+        for (idx, score) in current_scores
+            .iter()
+            .map(KeywordScore::non_neutral_average)
+            .enumerate()
+        {
             self.0[idx].push(score)
         }
     }

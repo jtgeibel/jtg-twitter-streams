@@ -56,6 +56,13 @@ the current stream of data sent by Twitter, even without this concurrency.
 
 ## Possible Enhancements
 
+* The current score tally logic tracks the average sentiment of each keyword since execution began.
+  This typically results in spikes and volatility early in the chart with the data settling down to
+  an overall average for each keyword.  With the current algorithm it will likely take a long time
+  for an overall change in sentiment to be reflected in the chart.  A sliding average should be
+  investigated.  If a small window is used then low activity keywords will be sensitive to spikes
+  due to outliers (which have less matches to be averaged against).  A window of 15 seconds may be
+  a good starting point.
 * It would be nice to move the legend outside of the chart area so that most recent data is not
   obscured, and to have thicker line weights in the plot.  Neither seems to be implemented upstream
   in the crate I picked.

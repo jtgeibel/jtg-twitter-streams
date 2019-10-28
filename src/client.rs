@@ -47,24 +47,31 @@ impl ClientState {
     }
 }
 
-/// A tally of the total score and tweet count for a keyword
+/// A tally of information used to calculate a keywords overall score
 #[derive(Debug, Default)]
 pub struct KeywordScore {
+    /// Cumulative score of all non-neutral tweets
     score_sum: f32,
+    /// Count of tweets with a non-zero sentiment score
+    non_neutral_count: u32,
+    /// Total count of tweets matching this keyword
     tweet_count: u32,
 }
 
 impl KeywordScore {
     fn add(&mut self, score: f32) {
-        self.score_sum += score;
         self.tweet_count += 1;
+        if score != 0.0 {
+            self.score_sum += score;
+            self.non_neutral_count += 1;
+        }
     }
 
-    pub fn average(&self) -> f32 {
-        if self.tweet_count == 0 {
+    pub fn non_neutral_average(&self) -> f32 {
+        if self.non_neutral_count == 0 {
             return 0.0;
         };
-        self.score_sum / (self.tweet_count as f32)
+        self.score_sum / (self.non_neutral_count as f32)
     }
 }
 
@@ -121,7 +128,10 @@ pub async fn process_twitter_message(
     let mut tweet_count = locks.tweet_count.lock().await;
     *tweet_count += 1;
     if log_enabled!(Trace) {
-        let average_scores: Vec<_> = scores.iter().map(KeywordScore::average).collect();
+        let average_scores: Vec<_> = scores
+            .iter()
+            .map(KeywordScore::non_neutral_average)
+            .collect();
         trace!(
             "{}: {} - {:?}; tweet: {}",
             *tweet_count,
