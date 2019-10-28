@@ -33,9 +33,9 @@ pub async fn process_twitter_message(
     json: string::String<bytes::Bytes>,
     // If multiple locks are held at once, they should be locked in parameter order to avoid a deadlock
     mut tick_tracker: Lock<TickTracker>,
-    mut accum: Lock<Vec<KeywordScore>>,
+    mut current_scores: Lock<Vec<KeywordScore>>,
     mut chart: Lock<plot::Chart>,
-    mut count: Lock<u32>,
+    mut tweet_count: Lock<u32>,
 ) -> Result<(), twitter_stream::error::Error> {
     // Save data at 1 second intervals
     let mut tick_tracker = tick_tracker.lock().await;
@@ -44,9 +44,9 @@ pub async fn process_twitter_message(
         // FIXME(JTG): If no messages come in within a 1 second interval, then no points will be
         // plotted for that interval
 
-        let accum = accum.lock().await;
+        let current_scores = current_scores.lock().await;
         let mut chart = chart.lock().await;
-        let current_scores: Vec<_> = accum.iter().map(KeywordScore::average).collect();
+        let current_scores: Vec<_> = current_scores.iter().map(KeywordScore::average).collect();
         for (idx, score) in current_scores.iter().enumerate() {
             // FIXME(JTG): Old data is never removed, this grows without bound
             chart.push(idx, *score);
@@ -75,22 +75,22 @@ pub async fn process_twitter_message(
     // Determine the keyword(s) present (could match more than one)
     // The whole blob from twitter is scanned, because many times the keyword is not in
     // the tweet itself
-    let mut accum = accum.lock().await; // FIXME(JTG): Do less work while holding this lock
+    let mut scores = current_scores.lock().await; // FIXME(JTG): Do less work while holding this lock
     for (i, keyword) in KEYWORDS.iter().enumerate() {
         if json.contains(keyword) {
-            accum[i].add(score);
+            scores[i].add(score);
         }
     }
 
-    let mut count = count.lock().await;
-    *count += 1;
+    let mut tweet_count = tweet_count.lock().await;
+    *tweet_count += 1;
     if log_enabled!(Trace) {
-        let current_scores: Vec<_> = accum.iter().map(KeywordScore::average).collect();
+        let average_scores: Vec<_> = scores.iter().map(KeywordScore::average).collect();
         trace!(
             "{}: {} - {:?}; tweet: {}",
-            *count,
+            *tweet_count,
             score,
-            current_scores,
+            average_scores,
             tweet
         );
     }
