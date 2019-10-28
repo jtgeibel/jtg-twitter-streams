@@ -1,4 +1,4 @@
-use super::{plot, KeywordScore, KEYWORDS};
+use super::{plot::Chart, KEYWORDS};
 
 use std::time::Instant;
 
@@ -7,6 +7,66 @@ use log::Level::Trace;
 use log::{error, log_enabled, trace};
 use tokio_executor::threadpool;
 use tokio_sync::Lock;
+
+/// Locks protecting state that is shared between client tasks
+///
+/// If multiple locks are held at the same time, they should be locked in definition order to avoid
+/// a deadlock.
+#[derive(Clone)]
+pub struct ClientState {
+    /// Track duration since program start to trigger new chart plots
+    tick_tracker: Lock<TickTracker>,
+    /// An accumulated current score for each keyword
+    current_scores: Lock<Vec<KeywordScore>>,
+    /// Chart storing keyword `current_scores` for each tick interval
+    chart: Lock<Chart>,
+    /// Total tweet count, for diagnostics purposes
+    tweet_count: Lock<u32>,
+}
+
+impl ClientState {
+    pub fn init() -> Self {
+        // Draw initial empty plot
+        let chart = Chart::new();
+        chart.plot_and_save().unwrap();
+        let chart = Lock::new(chart);
+
+        let tick_tracker = Lock::new(TickTracker::new());
+        let tweet_count = Lock::new(0u32);
+
+        let mut current_scores: Vec<KeywordScore> = Vec::new();
+        current_scores.resize_with(KEYWORDS.len(), Default::default);
+        let current_scores = Lock::new(current_scores);
+
+        Self {
+            tick_tracker,
+            current_scores,
+            chart,
+            tweet_count,
+        }
+    }
+}
+
+/// A tally of the total score and tweet count for a keyword
+#[derive(Clone, Debug, Default)]
+pub struct KeywordScore {
+    score_sum: f32,
+    tweet_count: u32,
+}
+
+impl KeywordScore {
+    fn add(&mut self, score: f32) {
+        self.score_sum += score;
+        self.tweet_count += 1;
+    }
+
+    fn average(&self) -> f32 {
+        if self.tweet_count == 0 {
+            return 0.0;
+        };
+        self.score_sum / (self.tweet_count as f32)
+    }
+}
 
 /// Application start time and a counter to determine when a new interval has occurred
 pub struct TickTracker {
@@ -31,21 +91,17 @@ impl TickTracker {
 
 pub async fn process_twitter_message(
     json: string::String<bytes::Bytes>,
-    // If multiple locks are held at once, they should be locked in parameter order to avoid a deadlock
-    mut tick_tracker: Lock<TickTracker>,
-    mut current_scores: Lock<Vec<KeywordScore>>,
-    mut chart: Lock<plot::Chart>,
-    mut tweet_count: Lock<u32>,
+    mut locks: ClientState,
 ) -> Result<(), twitter_stream::error::Error> {
     // Save data at 1 second intervals
-    let mut tick_tracker = tick_tracker.lock().await;
+    let mut tick_tracker = locks.tick_tracker.lock().await;
     let runtime = tick_tracker.runtime();
     if runtime > tick_tracker.seconds_count {
         // FIXME(JTG): If no messages come in within a 1 second interval, then no points will be
         // plotted for that interval
 
-        let current_scores = current_scores.lock().await;
-        let mut chart = chart.lock().await;
+        let current_scores = locks.current_scores.lock().await;
+        let mut chart = locks.chart.lock().await;
         let current_scores: Vec<_> = current_scores.iter().map(KeywordScore::average).collect();
         for (idx, score) in current_scores.iter().enumerate() {
             // FIXME(JTG): Old data is never removed, this grows without bound
@@ -75,14 +131,14 @@ pub async fn process_twitter_message(
     // Determine the keyword(s) present (could match more than one)
     // The whole blob from twitter is scanned, because many times the keyword is not in
     // the tweet itself
-    let mut scores = current_scores.lock().await; // FIXME(JTG): Do less work while holding this lock
+    let mut scores = locks.current_scores.lock().await; // FIXME(JTG): Do less work while holding this lock
     for (i, keyword) in KEYWORDS.iter().enumerate() {
         if json.contains(keyword) {
             scores[i].add(score);
         }
     }
 
-    let mut tweet_count = tweet_count.lock().await;
+    let mut tweet_count = locks.tweet_count.lock().await;
     *tweet_count += 1;
     if log_enabled!(Trace) {
         let average_scores: Vec<_> = scores.iter().map(KeywordScore::average).collect();
