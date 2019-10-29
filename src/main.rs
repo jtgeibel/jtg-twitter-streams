@@ -45,7 +45,7 @@ fn main() {
             let (future, handle) =
                 client::process_twitter_message(json, client_state.clone()).remote_handle();
             tokio::spawn(future);
-            handle.map(|_| Ok(()))
+            handle.map(Ok)
         });
 
     // Configure the HTTP "server task"
