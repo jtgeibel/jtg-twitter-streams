@@ -45,15 +45,6 @@ The two top-level tasks only share a single piece of state (the PNG image) throu
 After writing to a new file, the client task renames the file into place so the server task never
 observes a partially written file.
 
-Note that for some reason the client sub-tasks are not being run concurrently.  If I introduce delay into
-the sentiment analysis (via `thread::sleep`) then the next tweet is not processed until the
-previous future completes.  With the current design I expect that up to 4 threads should be able to
-sleep concurrently before stalling the processing of additional tweets.  If I add a similar sleep
-delay to the server task (within a call to `tokio_executor::threadpool::blocking`), things behave
-as expected and multiple HTTP clients are able to connect and sleep in parallel.  I have not yet
-tracked down the source of this bug, however the existing processing is sufficiently fast to handle
-the current stream of data sent by Twitter, even without this concurrency.
-
 ## Possible Enhancements
 
 * The current score tally logic tracks the average sentiment of each keyword since execution began.

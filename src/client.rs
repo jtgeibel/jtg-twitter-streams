@@ -97,10 +97,7 @@ impl TickTracker {
 }
 
 /// Process a JSON message, updating shared client state to track scores and plot the analysis
-pub async fn process_twitter_message(
-    json: string::String<bytes::Bytes>,
-    mut locks: ClientState,
-) -> Result<(), twitter_stream::error::Error> {
+pub async fn process_twitter_message(json: string::String<bytes::Bytes>, mut locks: ClientState) {
     save_chart_if_new_tick(&mut locks).await;
 
     let result = future::poll_fn(|_| threadpool::blocking(|| process(&json)))
@@ -110,9 +107,9 @@ pub async fn process_twitter_message(
         Ok(s) => s,
         Err(ProcessError::NoTweet(value)) => {
             error!("NoTweet: {}", value);
-            return Ok(());
+            return;
         }
-        Err(_) => return Ok(()),
+        Err(_) => return,
     };
 
     // Determine the keyword(s) present (could match more than one)
@@ -140,8 +137,6 @@ pub async fn process_twitter_message(
             tweet
         );
     }
-
-    Ok(())
 }
 
 /// Check if a new 1 second interval has passed, saving a new chart if so

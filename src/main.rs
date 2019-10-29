@@ -40,10 +40,12 @@ fn main() {
         .listen()
         .unwrap()
         .try_flatten_stream()
-        // FIXME(JTG): This stream is not actually being processed concurrently and its unclear why not
-        // See the note in the architecture section of the README
         .try_for_each_concurrent(4, move |json| {
-            client::process_twitter_message(json, client_state.clone())
+            // TODO: Use spawn_with_handle once that is available upstream
+            let (future, handle) =
+                client::process_twitter_message(json, client_state.clone()).remote_handle();
+            tokio::spawn(future);
+            handle.map(|_| Ok(()))
         });
 
     // Configure the HTTP "server task"
