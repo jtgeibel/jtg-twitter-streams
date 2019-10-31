@@ -62,8 +62,6 @@ observes a partially written file.
   client-side rendering.  The current plotting library appears to support compilation to WASM and
   could possibly be used there.
 * A WebSocket could be used to send data incrementally for client-side rendering.
-* A debug assertion is hit within `miniz_oxide-0.3.4` when run in debug mode.  Check if this is
-  reported upstream.
 
 ## License
 
