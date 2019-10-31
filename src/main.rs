@@ -38,7 +38,7 @@ fn main() {
         .language("en")
         .track(Some(&*keywords))
         .listen()
-        .unwrap()
+        .expect("TLS error")
         .try_flatten_stream()
         .try_for_each_concurrent(4, move |json| {
             // TODO: Use spawn_with_handle once that is available upstream

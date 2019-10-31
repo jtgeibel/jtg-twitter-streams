@@ -25,5 +25,5 @@ async fn serve_file(file: &str) -> Response<Body> {
     Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
         .body(Body::empty())
-        .unwrap()
+        .expect("Unexpected invalid header")
 }

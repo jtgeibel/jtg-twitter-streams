@@ -26,9 +26,8 @@ pub struct ClientState {
 
 impl ClientState {
     pub fn init() -> Self {
-        // Draw initial empty plot
         let chart = Chart::new();
-        chart.plot_and_save().unwrap();
+        chart.plot_and_save().expect("Unable to draw empty plot");
         let chart = Lock::new(chart);
 
         let tick_tracker = Lock::new(TickTracker::new());
@@ -102,7 +101,7 @@ pub async fn process_twitter_message(json: string::String<bytes::Bytes>, mut loc
 
     let result = future::poll_fn(|_| threadpool::blocking(|| process(&json)))
         .await
-        .unwrap();
+        .expect("Thread pool has shutdown");
     let (tweet, score) = match result {
         Ok(s) => s,
         Err(ProcessError::NoTweet(value)) => {
@@ -151,12 +150,15 @@ async fn save_chart_if_new_tick(locks: &mut ClientState) {
         let mut chart = locks.chart.lock().await;
         // FIXME(JTG): Old data is never removed, this grows without bound
         chart.push(&current_scores);
+        tick_tracker.seconds_count = runtime;
 
         // FIXME(JTG): If chart drawing becomes slow it will delay releasing lock on tick_tracker, stalling other tasks
-        future::poll_fn(|_| threadpool::blocking(|| chart.plot_and_save().unwrap()))
+        future::poll_fn(|_| threadpool::blocking(|| chart.plot_and_save()))
             .await
-            .unwrap();
-        tick_tracker.seconds_count = runtime;
+            .expect("Thread pool has shutdown")
+            .unwrap_or_else(|e| {
+                error!("Error generating plot: {}", e);
+            });
     }
 }
 
