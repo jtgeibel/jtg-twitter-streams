@@ -1,11 +1,12 @@
 use super::{plot::Chart, KEYWORDS};
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use futures::future;
 use log::Level::Trace;
 use log::{error, log_enabled, trace};
-use tokio::sync::Lock;
+use tokio::sync::Mutex;
 use tokio_executor::threadpool;
 
 /// Locks that protect shared state between client tasks
@@ -15,27 +16,27 @@ use tokio_executor::threadpool;
 #[derive(Clone)]
 pub struct ClientState {
     /// Track duration since program start to trigger new chart plots
-    tick_tracker: Lock<TickTracker>,
+    tick_tracker: Arc<Mutex<TickTracker>>,
     /// An accumulated current score for each keyword
-    current_scores: Lock<Vec<KeywordScore>>,
+    current_scores: Arc<Mutex<Vec<KeywordScore>>>,
     /// Chart storing keyword `current_scores` for each tick interval
-    chart: Lock<Chart>,
+    chart: Arc<Mutex<Chart>>,
     /// Total tweet count, for diagnostics purposes
-    tweet_count: Lock<u32>,
+    tweet_count: Arc<Mutex<u32>>,
 }
 
 impl ClientState {
     pub fn init() -> Self {
         let chart = Chart::new();
         chart.plot_and_save().expect("Unable to draw empty plot");
-        let chart = Lock::new(chart);
+        let chart = Arc::new(Mutex::new(chart));
 
-        let tick_tracker = Lock::new(TickTracker::new());
-        let tweet_count = Lock::new(0u32);
+        let tick_tracker = Arc::new(Mutex::new(TickTracker::new()));
+        let tweet_count = Arc::new(Mutex::new(0u32));
 
         let mut current_scores = Vec::new();
         current_scores.resize_with(KEYWORDS.len(), Default::default);
-        let current_scores = Lock::new(current_scores);
+        let current_scores = Arc::new(Mutex::new(current_scores));
 
         Self {
             tick_tracker,
